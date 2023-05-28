@@ -1,11 +1,12 @@
 from micropython import alloc_emergency_exception_buf
 from uio import StringIO
 import uasyncio, time, ujson, sys
-from machine import RTC, Pin, I2C
+from machine import RTC
 from besp import WDT, watch_network
 import config
 from umqtt.robust import MQTTClient as BaseMQTTClient
-import ssd1306
+from monitor.display import Display
+import monitor.icons as icons
 
 
 # Uncomment for debugging
@@ -27,38 +28,10 @@ VALID_TOPICS = set(METRICS.keys())
 ### Display ###
 
 
-class Display(object):
-
-    def __init__(self):
-        self._display = self._create_display()
-
-    def _create_display(self):
-        i2c = I2C(scl=Pin(5), sda=Pin(4), freq=100000)
-        return ssd1306.SSD1306_I2C(128, 64, i2c)
-
-    def _print_source(self, on_grid):
-        self._display.fill(0)
-
-        if on_grid:
-            self._display.text('Grid', 46, 28, 1)
-            self._display.hline(20, 14, 88, 1)
-            self._display.vline(20, 14, 36, 1)
-            self._display.hline(20, 50, 88, 1)
-            self._display.vline(108, 14, 36, 1)
-            self._display.contrast(0)
-            self._display.show()
-        else:
-            pass
-
-        self._display.show()
-
-    def _print_battery_status(self, percentage):
-        pass
-
-    def _print_consumption(self, percentage):
-        pass
+class MonitorDisplay(Display):
 
     def update_display(self, metric, value):
+        WDT.feed()
         if METRICS[metric] != value:
             METRICS[metric] = value
 
@@ -69,19 +42,12 @@ class Display(object):
                            - METRICS[config.MQTT_TOPIC_CONSUMPTION_L3])
 
             if metric == config.MQTT_TOPIC_MAIN_LINE_STATUS:
-                self._print_source(on_grid)
+                self.set_source_display(on_grid)
+            self.update_stats_display(on_grid, METRICS[config.MQTT_TOPIC_BATTERY_CHARGE_LEVEL], consumption)
 
-            if not on_grid:
-                if metric == config.MQTT_TOPIC_BATTERY_CHARGE_LEVEL:
-                    self._print_battery_status(METRICS[config.MQTT_TOPIC_BATTERY_CHARGE_LEVEL])
-                else:
-                    self._print_consumption(consumption)
-
-            print('{} - {},{}'.format(on_grid, 
-                                      consumption,
-                                      METRICS[config.MQTT_TOPIC_BATTERY_CHARGE_LEVEL]))
-        
-        WDT.feed()
+            #print('{} - {}, {}'.format(on_grid, 
+            #                          consumption,
+            #                          METRICS[config.MQTT_TOPIC_BATTERY_CHARGE_LEVEL]))
 
 
 ### MQTT ###
@@ -89,7 +55,7 @@ class Display(object):
 class MQTTClient(object):
 
     def __init__(self):
-        self._display = Display()
+        self._display = MonitorDisplay()
         self._client = self._create_client()
 
     def _create_client(self):
